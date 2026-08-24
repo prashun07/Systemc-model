@@ -46,6 +46,9 @@
 #define PS_PL_BASE           0xF0000000ull
 #define PS_PL_SIZE           0x00100000ull
 
+/* Must outlive machine init — arm_load_kernel stores a pointer in each CPU. */
+static struct arm_boot_info ps_bootinfo;
+
 /*
  * Create Cortex-A9 CPUs, the A9MPCore private peripheral block (GIC + timers),
  * and wire CPU IRQ/FIQ/VIRQ/VFIQ lines to the interrupt controller.
@@ -109,7 +112,8 @@ static void systemc_ps_init(MachineState *machine)
     DeviceState *bridge;
     qemu_irq pic[PS_GIC_EXT_IRQS];
     const char *sock = getenv("SYSTEMC_COSIM_SOCKET");
-    struct arm_boot_info bootinfo = {};
+
+    memset(&ps_bootinfo, 0, sizeof(ps_bootinfo));
 
     if (!sock || !sock[0]) {
         sock = "/tmp/systemc_cosim.sock";
@@ -137,10 +141,10 @@ static void systemc_ps_init(MachineState *machine)
     sysbus_connect_irq(SYS_BUS_DEVICE(bridge), 0, pic[32]);
     sysbus_connect_irq(SYS_BUS_DEVICE(bridge), 1, pic[33]);
 
-    bootinfo.ram_size = machine->ram_size;
-    bootinfo.loader_start = PS_DDR_BASE;
-    bootinfo.board_id = 0x8e0;
-    arm_load_kernel(ARM_CPU(first_cpu), machine, &bootinfo);
+    ps_bootinfo.ram_size = machine->ram_size;
+    ps_bootinfo.loader_start = PS_DDR_BASE;
+    ps_bootinfo.board_id = 0x8e0;
+    arm_load_kernel(ARM_CPU(first_cpu), machine, &ps_bootinfo);
 }
 
 /*

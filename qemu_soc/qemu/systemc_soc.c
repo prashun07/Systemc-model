@@ -78,7 +78,7 @@ static void systemc_soc_init(MachineState *machine)
 
     /*
      * remote-mmio bridge: guest MMIO at BRIDGE_BASE -> CosimServer socket.
-     * Socket path must match CosimServer (see run_cosim.sh).
+     * Socket path must match CosimServer (see run_platform.sh).
      */
     bridge = qdev_new(TYPE_REMOTE_MMIO);
     qdev_prop_set_string(bridge, "socket", sock);

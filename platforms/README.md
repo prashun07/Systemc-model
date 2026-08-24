@@ -23,15 +23,14 @@ From `systemc_model/`:
 
 ```bash
 ./scripts/build_qemu.sh      # once
-./scripts/run_cosim.sh         # basic_cortexM
-./scripts/run_cosim_ps.sh      # basic_cortexA
-```
-
-Or explicitly:
-
-```bash
 ./scripts/run_platform.sh basic_cortexM
 ./scripts/run_platform.sh basic_cortexA
+```
+
+Or list all platforms:
+
+```bash
+./scripts/run_platform.sh list
 ```
 
 ## Add a new model

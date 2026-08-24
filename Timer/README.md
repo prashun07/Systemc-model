@@ -303,7 +303,7 @@ A second QEMU machine targets **application-class** software development:
 | Console | semihosting | PL011 UART @ `0x10009000` |
 | Interrupts | NVIC | GIC (A9 MPCore private) |
 | PL bridge | `0x40000000` | `0xF0000000` |
-| Run script | `run_cosim.sh` | `run_cosim_ps.sh` |
+| Run script | `run_platform.sh basic_cortexM` | `run_platform.sh basic_cortexA` |
 
 The SystemC side is the same TLM stack; only `SYSTEMC_PL_BASE` and the QEMU machine change.
 
@@ -615,7 +615,7 @@ Magic = `SCM1`. This protocol is intentionally peripheral-agnostic.
 ## 9. Boot and run sequence
 
 ```text
-scripts/run_cosim.sh   (from systemc_model/)
+scripts/run_platform.sh basic_cortexM   (from systemc_model/)
    │
    ├─1─ make platforms/basic_cortexM/firmware/timer_fw.elf
    ├─2─ make platforms/basic_cortexM/cosim_platform
@@ -640,7 +640,7 @@ Inside QEMU after reset:
 | Mode | Command | CPU | Timer implementation |
 |------|---------|-----|----------------------|
 | **SystemC-only TB** | build/run `Timer/timer_tb.cpp` | Stimulus thread in SystemC | User Timer |
-| **Virtual SoC cosim** | `./scripts/run_cosim.sh` (from `systemc_model/`) | QEMU Cortex-M3 + baremetal | Same user Timer via bridge |
+| **Virtual SoC cosim** | `./scripts/run_platform.sh basic_cortexM` | QEMU Cortex-M3 + baremetal | Same user Timer via bridge |
 
 Use the testbench to verify the IP in isolation. Use cosim to verify **software + SoC integration**.
 
@@ -663,7 +663,7 @@ Use the testbench to verify the IP in isolation. Use cosim to verify **software 
 | Path | Architecture piece |
 |------|--------------------|
 | `Timer/` | User peripheral model (independent IP) |
-| `scripts/` | `build_qemu.sh`, `run_platform.sh`, `run_cosim.sh` |
+| `scripts/` | `build_qemu.sh`, `run_platform.sh` |
 | `platforms/` | Per-model cosim harness + `.env` configs |
 | `qemu_soc/qemu/` | Virtual SoC machine + remote MMIO bridge |
 | `qemu_soc/wrapper/` | SystemC-side TLM / adapter / socket server |
