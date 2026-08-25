@@ -8,20 +8,25 @@ Cosimulate **QEMU (system mode)** with **SystemC peripheral models** in a separa
 
 ```text
 systemc_model/
-  scripts/           setup_host.sh, build_qemu.sh, run_platform.sh, config.sh
-  platforms/         cosim harness + firmware + *.env per target
-  Timer/             user SystemC IP (no QEMU dependency)
-  qemu_soc/          generic bridge, TLM wrapper, QEMU machine patches
-  Setup.md           install and first-run steps
+  processor/         QEMU machines (Cortex-M3 / Cortex-A9)
+  transactor/        CosimServer (Unix socket → TLM)
+  interconnect/      AHB / APB address decoders
+  bridges/           remote-mmio, AHB-APB, pin transactor
+  peripherals/       UART, GPIO, WDT, SRAM, SysCtrl, timer/
+  clocks/            sys_clk, pclk, reset
+  include/           memory map, TLM helpers, SCM1 protocol
+  soc/               CortexMPlSoc wiring
+  platforms/         firmware + sc_main
+  scripts/
 ```
 
-| Piece | Location | Role |
-|-------|----------|------|
-| User model | `Timer/` | SystemC peripheral IP |
-| Cosim bridge | `qemu_soc/` | Socket, TLM, `systemc-soc` / `systemc-ps` machines |
-| Platform | `platforms/basic_cortexM/`, `basic_cortexA/` | `cosim_main.cpp` + `firmware/` + `.env` |
-
-Models and `qemu_soc/` are **independent**. A platform under `platforms/` wires them at run time.
+| Piece | Location |
+|-------|----------|
+| CPU (QEMU) | `processor/` |
+| Host transactor | `transactor/` |
+| Fabric | `interconnect/`, `bridges/` |
+| IP | `peripherals/` |
+| Platform | `platforms/basic_cortexM/`, `basic_cortexA/` |
 
 ---
 
@@ -59,25 +64,28 @@ Use **custom QEMU** from `~/qemu-systemc` (not Homebrew). Homebrew `qemu-system-
 
 | Process | Binary | Role |
 |---------|--------|------|
-| **SystemC** | `platforms/basic_cortexM/cosim_platform` | Timer model, TLM bus, socket server |
+| **SystemC** | `platforms/basic_cortexM/cosim_platform` | Virtual PL SoC (clocks, interconnect, peripherals) |
 | **QEMU** | `qemu-system-arm -M systemc-soc` | Cortex-M3, Flash, SRAM, NVIC, MMIO bridge |
 
 ```text
  ┌─────────────────────────────────────────────────────────────────────────┐
  │                         HOST (macOS / Linux)                            │
  │                                                                         │
- │  QEMU (systemc-soc)                     SystemC (cosim_platform)        │
- │  ┌────────────────────────┐            ┌────────────────────────┐     │
- │  │ Cortex-M3              │            │ sc_clock (10 ns)       │     │
- │  │ Flash / SRAM / NVIC    │            │ CosimServer (TLM)      │     │
- │  │ remote-mmio @0x40000000├─Unix socket► TlmAddressMap           │     │
- │  │                        │            │ TlmPinBridge → Timer   │     │
- │  └────────────────────────┘            └────────────────────────┘     │
+ │  QEMU (systemc-soc)                     SystemC virtual PL SoC          │
+ │  ┌────────────────────────┐            ┌────────────────────────────┐ │
+ │  │ Cortex-M3              │            │ ClockReset sys/pclk/reset  │ │
+ │  │ Flash / SRAM / NVIC    │            │ CosimServer (transactor)   │ │
+ │  │ remote-mmio 1 MiB      ├─Unix sock─►│ CosimServer (AHB master)    │ │
+ │  │   @ 0x40000000         │  irq_bits  │ AhbDecoder + AHB-APB bridge │ │
+ │  │                        │            │ Timer SRAM GPIO UART WDT   │ │
+ │  └────────────────────────┘            └────────────────────────────┘ │
  │  Guest: platforms/basic_cortexM/firmware/timer_fw.elf                  │
  └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Data path:** guest MMIO → `remote-mmio` → socket → `CosimServer` → `TlmAddressMap` → `TlmPinBridge` → `Timer/`
+**Data path:** guest MMIO → `remote-mmio` → socket → `CosimServer` → AHB decoder → AHB-APB bridge → APB IP
+
+See [`soc/README.md`](soc/README.md) for the PL memory map.
 
 ---
 
@@ -124,7 +132,7 @@ On **basic_cortexA**, the same test flow appears over **PL011 UART** (`-nographi
 | PL MMIO window | Address decode + socket bridge only | Real peripheral behavior |
 | `sc_clock` / cycle-accurate timer | No | Yes |
 
-Guest firmware uses absolute PL addresses (e.g. `0x40000000`). QEMU forwards **window offsets** (`0x00`–`0x0C`) to SystemC.
+Guest firmware uses absolute PL addresses (e.g. `0x40000000`). QEMU forwards **window offsets** to SystemC.
 
 ---
 
@@ -136,7 +144,13 @@ Guest firmware uses absolute PL addresses (e.g. `0x40000000`). QEMU forwards **w
 |--------|------|------|
 | Flash | `0x00000000` | `timer_fw.elf` |
 | SRAM | `0x20000000` | Stack / data |
-| Timer (PL) | `0x40000000` | → SystemC via `remote-mmio` |
+| PL window | `0x40000000` (1 MiB) | SystemC PL SoC via `remote-mmio` |
+| Timer | `0x40000000` | AHB pin-level Timer |
+| SRAM | `0x40008000` | AHB 4 KiB |
+| GPIO | `0x40010000` | APB GPIO |
+| UART | `0x40011000` | APB PL011-lite |
+| SysCtrl | `0x40012000` | APB ID / clocks |
+| WDT | `0x40013000` | APB watchdog |
 
 ### Cortex-A9 (`systemc-ps`)
 
@@ -146,7 +160,7 @@ Guest firmware uses absolute PL addresses (e.g. `0x40000000`). QEMU forwards **w
 | PL011 UART | `0x10009000` | Console |
 | Timer (PL) | `0xF0000000` | → SystemC via `remote-mmio` |
 
-See `qemu_soc/include/soc_memory_map.h`.
+See `include/soc_memory_map.h`.
 
 ### Timer registers (firmware ↔ model)
 
@@ -157,7 +171,7 @@ See `qemu_soc/include/soc_memory_map.h`.
 | `+0x08` | CMP | Compare threshold |
 | `+0x0C` | INTR | Compare / overflow status |
 
-Headers: `platforms/*/firmware/timer_regs.h` and `Timer/timer.h`.
+Headers: `platforms/*/firmware/timer_regs.h` and `peripherals/timer/timer.h`.
 
 ---
 
@@ -177,10 +191,11 @@ Each guest MMIO access blocks until SystemC responds.
 ### SystemC path
 
 ```text
-CosimServer → TlmAddressMap → TlmPinBridge → Timer
+CosimServer → AhbDecoder → AhbApbBridge → ApbDecoder → peripherals
+           ↘ TlmPinBridge → Timer
 ```
 
-Wiring in `platforms/basic_cortexM/cosim_main.cpp` (same topology for `basic_cortexA`).
+Wiring in `soc/cortexm_pl.h` (`basic_cortexA` still uses pin Timer + `TlmAddressMap`).
 
 ### QEMU path
 
@@ -209,24 +224,24 @@ Wiring in `platforms/basic_cortexM/cosim_main.cpp` (same topology for `basic_cor
 | Platform configs | `platforms/basic_cortexM.env`, `platforms/basic_cortexA.env` |
 | Platform top | `platforms/*/cosim_main.cpp` |
 | Firmware + logs | `platforms/*/firmware/main.c`, `log.h` |
-| User model | `Timer/timer.h` |
-| Socket server | `qemu_soc/wrapper/cosim_server.cpp` |
-| TLM fabric | `qemu_soc/wrapper/tlm_address_map.h`, `tlm_pin_bridge.h` |
-| QEMU bridge | `qemu_soc/qemu/remote_mmio.c` |
-| QEMU machines | `qemu_soc/qemu/systemc_soc.c`, `systemc_ps.c` |
-| Protocol | `qemu_soc/protocol/cosim_protocol.h` |
+| User model | `peripherals/timer/timer.h` |
+| Socket server | `transactor/cosim_server.cpp` |
+| Interconnect | `interconnect/tlm_decoder.h` |
+| Bridges | `bridges/remote_mmio.c`, `ahb_apb_bridge.h`, `tlm_pin_bridge.h` |
+| QEMU machines | `processor/systemc_soc.c`, `systemc_ps.c` |
+| Protocol | `include/cosim_protocol.h` |
 
 ---
 
 ## Adding a new model
 
-1. Create IP under e.g. `MyPeriph/` (standalone testbench first).
+1. Create IP under `peripherals/` (standalone testbench first).
 2. Copy `platforms/basic_cortexM` or `platforms/_template/`.
 3. Edit `cosim_main.cpp` and `firmware/`.
 4. Add `platforms/my_model_m3.env`.
 5. Run `./scripts/run_platform.sh my_model_m3`.
 
-No `qemu_soc/` changes needed for pin-level models following `qemu_soc/wrapper/peripheral_if.h`.
+Pin-level models follow `bridges/peripheral_if.h`.
 
 Details: [`platforms/README.md`](platforms/README.md).
 
@@ -248,6 +263,6 @@ Details: [`platforms/README.md`](platforms/README.md).
 |----------|---------|
 | [`Setup.md`](Setup.md) | SystemC/QEMU install, env vars, first run |
 | [`platforms/README.md`](platforms/README.md) | Platform `.env` variables, new model checklist |
-| [`Timer/Timer.md`](Timer/Timer.md) | Timer model + SystemC interview Q&A |
-| [`Timer/README.md`](Timer/README.md) | Full Timer architecture and cosim call chains |
+| [`peripherals/timer/Timer.md`](peripherals/timer/Timer.md) | Timer model + SystemC interview Q&A |
+| [`peripherals/timer/README.md`](peripherals/timer/README.md) | Full Timer architecture and cosim call chains |
 | [`platforms/basic_cortexM/firmware/startup.md`](platforms/basic_cortexM/firmware/startup.md) | Cortex-M boot / vector table |

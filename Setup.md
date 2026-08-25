@@ -33,18 +33,21 @@ systemc_model/
     run_platform.sh     # build firmware + cosim, launch both processes
     config.sh           # platform paths and *.env loader
   platforms/
-    basic_cortexM/      # Cortex-M3 cosim + Timer firmware
+    basic_cortexM/      # Cortex-M3 + virtual PL SoC firmware
     basic_cortexA/      # Cortex-A9 cosim + Timer firmware
-    basic_cortexM.env   # platform config (machine, PL base, firmware)
+    basic_cortexM.env
     basic_cortexA.env
-  Timer/                # SystemC IP (no QEMU dependency)
-  qemu_soc/             # generic bridge, TLM wrapper, QEMU machine sources
-    qemu/               # systemc_soc.c, systemc_ps.c, remote_mmio.c
-    wrapper/            # CosimServer, TLM bus, pin bridge
-    scripts/            # forwards to top-level scripts/
+  processor/            # QEMU CPU machines
+  transactor/           # CosimServer
+  interconnect/         # AHB/APB decoders
+  bridges/              # remote-mmio, AHB-APB, pin bridge
+  peripherals/          # UART, GPIO, WDT, SRAM, SysCtrl, timer
+  clocks/
+  include/              # memory map, TLM helpers, SCM1 protocol
+  soc/
 ```
 
-`Timer/` and `qemu_soc/` are **independent**. A platform under `platforms/` wires them together at run time.
+Role directories at the top level hold SystemC and QEMU models. `platforms/` only wires a machine + firmware.
 
 ### Reference platforms
 
@@ -300,7 +303,7 @@ From `systemc_model/`:
 This script:
 
 1. Clones QEMU **v10.0.0** to `~/qemu-systemc-src` (if missing)
-2. Copies machine sources from `qemu_soc/qemu/` into the QEMU tree
+2. Copies `processor/*.c` and `bridges/remote_mmio.*` into the QEMU tree
 3. Patches Kconfig / meson.build for `REMOTE_MMIO`, `SYSTEMC_SOC`, `SYSTEMC_PS`
 4. Configures `arm-softmmu` only, installs to `~/qemu-systemc`
 
@@ -375,9 +378,9 @@ All commands from **`systemc_model/`**.
 QEMU guest MMIO
   → remote-mmio (in QEMU)
   → Unix socket (/tmp/systemc_cosim.sock)
-  → CosimServer (qemu_soc/wrapper)
-  → TlmAddressMap → TlmPinBridge
-  → Timer/ (or your model)
+  → CosimServer (`transactor/`)
+  → interconnect / bridges
+  → peripherals (or your model)
 ```
 
 ### Expected output (abbreviated)
@@ -421,9 +424,13 @@ On **basic_cortexA**, the same test flow prints over **PL011 UART** (`-nographic
 | `arm-none-eabi-gcc: command not found` | Toolchain missing | Re-run `./scripts/setup_host.sh --deps-only` or install manually (Step 1) |
 | Stale socket | Previous run crashed | `rm -f /tmp/systemc_cosim.sock` |
 
-### Rebuild after pulling qemu_soc changes
+### Rebuild after pulling processor / bridge changes
 
-If `qemu_soc/qemu/*.c` changed on `git pull`:
+If `processor/*.c` or `bridges/remote_mmio.c` changed (for example the Cortex-M PL window size):
+
+```bash
+./scripts/build_qemu.sh
+```
 
 ```bash
 ./scripts/build_qemu.sh
