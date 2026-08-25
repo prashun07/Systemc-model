@@ -1,13 +1,2 @@
-*
-!Timer
-!Timer/*.h
-!Timer/*.cpp
-!Timer/*.vcd
-!qemu_soc
-!qemu_soc/**
-!README.md
-!Setup.md
-!.gitignore
-!platforms/
-!scripts/
+
 
